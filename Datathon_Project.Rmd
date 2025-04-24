@@ -22,7 +22,7 @@ sum(is.na(categorical))
 sum(is.na(connectome))
 sum(is.na(solution))
 
-# Imputating the NA values
+# Imputating the NA values with the mean
 quant <- quantitative
 for (i in 1:ncol(quant)) {
   if(is.numeric(quant[[i]])){
@@ -140,7 +140,7 @@ sum(is.na(test_quantitative))
 sum(is.na(test_categorical))
 sum(is.na(test_connectome))
 
-# Imputating the NA values
+# Imputating the NA values with the mean
 test_quant <- test_quantitative
 for (i in 1:ncol(test_quant)) {
   if(is.numeric(test_quant[[i]])){
