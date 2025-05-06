@@ -6,7 +6,8 @@ output: pdf_document
 ---
 
 ```{r}
-# Importing the TRAIN dataset---------------------------------------------------------------------------------------------------------------------
+#(Samira)
+# Importing the TRAIN dataset------------------------------------------------------------------------------------------------------------
 library(readxl)
 setwd("C:/Users/nassi/OneDrive/Documents/ISTA_321/widsdatathon2025/TRAIN_NEW")
 quantitative <- read_excel("TRAIN_QUANTITATIVE_METADATA_new.xlsx")
@@ -15,7 +16,10 @@ solution <- read_excel("TRAINING_SOLUTIONS.xlsx")
 connectome <- read.csv("TRAIN_FUNCTIONAL_CONNECTOME_MATRICES_new_36P_Pearson.csv")
 ```
 
+
+
 ```{r}
+#(Samira)
 # Checking if there are any NA's
 sum(is.na(quantitative))
 sum(is.na(categorical))
@@ -31,28 +35,56 @@ for (i in 1:ncol(quant)) {
 }
 sum(is.na(quant))
 
+# Imputating the NA values with the median
 cat <- categorical 
 for (i in 1:ncol(cat)){
   if(is.numeric(cat[[i]])){
-    cat[[i]][is.na(cat[[i]])] <- mean(cat[[i]], na.rm = TRUE)
+    cat[[i]][is.na(cat[[i]])] <- median(cat[[i]], na.rm = TRUE)
   }
 }
 sum(is.na(cat))
 ```
 
 ```{r}
-# Merging the train dataset
+#(Samira)
 library(tidyverse)
-
+# Merging the train dataset
 merged_data <- inner_join(quant, cat, by = "participant_id")
 all_data <- inner_join(merged_data, solution, by = "participant_id")
+head(all_data)
 ```
 
 ```{r}
+#(Samira)
+library(ggplot2)
 library(dplyr)
-# PCA to reduce dimensionality on the connectome
+ # Creating some visualizations
+par(mfrow=c(2,2))
+hist(all_data$ADHD_Outcome,
+      main = "ADHD Outcome Histogram",
+      xlab = "ADHD Outcome")
+hist(all_data$Sex_F,
+      main = "Sex Histogram",
+      xlab = "Sex Female")
+ 
+# Finding the mean of Adhd diagnosis by sex
+mean_adhd_by_sex <- all_data %>%
+  group_by(Sex_F) %>%
+  summarise(Mean_ADHD = mean(ADHD_Outcome), .groups = 'drop')
+mean_adhd_by_sex
+
+# Doing a t-test to see if there is a significant difference in means
+t.test(ADHD_Outcome~Sex_F, data = all_data)
+```
+
+```{r}
+#(Genesis)
+#PCA---------------------------------------------------------------------------------------------------------------------------------------------
+library(dplyr)
+
+# PCA to reduce dimensionality on the train connectome
 matrix_only <- connectome %>%
-  select(where(is.numeric))
+  dplyr::select(where(is.numeric))
 
 matrix_scaled <- scale(matrix_only)
 
@@ -60,16 +92,18 @@ pca_result <- prcomp(matrix_scaled, center = TRUE, scale. = TRUE)
 ```
 
 ```{r}
+#(Samira)
 # Extracting the the eigenvalues from the PCA object
 eigenvalues <- pca_result$sdev^2
 
-# Count eigenvalues less than 1
+# Count eigenvalues less than 1 (Kaiser's Rule)
 sum(eigenvalues < 1)
 
-# Create a scree plot
+# Create a scree plot because there was only one eigenvalue less than 1
 plot(eigenvalues, type = "b",
      xlab = "Principal Component",
-     ylab = "Eigenvalue")
+     ylab = "Eigenvalue",
+     main = "Scree Plot")
 
 # Add a line at y = 1 to indicate the elbow
 abline(h = 1, col = "red")
@@ -79,21 +113,23 @@ connectome_pca <- as.data.frame(pca_result$x[,1:50])
 ```
 
 ```{r}
+#(Samira)
 # Merging the pca connectome to all of the whole train dataset
 final_dataset <- bind_cols(all_data %>%
-                             select(ADHD_Outcome, Sex_F, everything()), connectome_pca)
+                             dplyr::select(ADHD_Outcome, Sex_F, everything()), connectome_pca)
 head(final_dataset)
 ```
 
 ```{r}
+#(Genesis)
 library(caret)
 # Removing non-predictive IDs
-data_model <- final_dataset %>% select(-participant_id)
+data_model <- final_dataset %>% dplyr::select(-participant_id)
 
 # Defining targets
-targets <- data_model %>% select(ADHD_Outcome, Sex_F)
+targets <- data_model %>% dplyr::select(ADHD_Outcome, Sex_F)
 
-predictors <- data_model %>% select(-ADHD_Outcome, -Sex_F)
+predictors <- data_model %>% dplyr::select(-ADHD_Outcome, -Sex_F)
 
 # Train/test split (80/20)
 set.seed(123)
@@ -106,6 +142,8 @@ Y_test <- targets[-train_index, ]
 ```
 
 ```{r}
+#(Genesis)
+# Random Forest-----------------------------------------------------------------------------------------------------------------------------------
 library("randomForest")
 
 #ADHD Output model
@@ -116,16 +154,143 @@ rf_sex <- randomForest(x = X_train, y = as.factor(Y_train$Sex_F), ntree = 500)
 
 #Evaluate Models
 adhd_preds <- predict(rf_adhd, X_test, type = "prob")[, 2]
-#adhd_auc <- AUC(adhd_preds, Y_test$ADHD_Outcome) # Need to find library for AUC
-
 sex_preds <- predict(rf_sex, X_test, type = "prob")[, 2]
-#sex_auc <- AUC(sex_preds, Y_test$Sex_F)
 
 importance(rf_adhd) %>% as.data.frame() %>% arrange(desc(MeanDecreaseGini)) %>% head(10)
 importance(rf_sex) %>% as.data.frame() %>% arrange(desc(MeanDecreaseGini)) %>% head(10)
 ```
 
 ```{r}
+#(Fuad)
+library(caret)
+library(pROC)
+
+# ADHD Model Evaluation
+adhd_preds_class <- predict(rf_adhd, X_test)
+adhd_conf_matrix <- confusionMatrix(adhd_preds_class, as.factor(Y_test$ADHD_Outcome))
+print(adhd_conf_matrix)
+
+# Create ROC curve for ADHD prediction
+adhd_probs <- predict(rf_adhd, X_test, type = "prob")[,2]
+adhd_roc <- roc(Y_test$ADHD_Outcome, adhd_probs)
+auc_adhd <- auc(adhd_roc)
+
+# Sex Model Evaluation
+sex_preds_class <- predict(rf_sex, X_test)
+sex_conf_matrix <- confusionMatrix(sex_preds_class, as.factor(Y_test$Sex_F))
+print(sex_conf_matrix)
+
+# Create ROC curve for Sex prediction
+sex_probs <- predict(rf_sex, X_test, type = "prob")[,2]
+sex_roc <- roc(Y_test$Sex_F, sex_probs)
+auc_sex <- auc(sex_roc)
+
+# Plot ROC curves
+par(mfrow = c(1, 2))
+plot(adhd_roc, main = paste("ADHD ROC Curve (AUC =", round(auc_adhd, 3), ")"))
+plot(sex_roc, main = paste("Sex ROC Curve (AUC =", round(auc_sex, 3), ")"))
+par(mfrow = c(1, 1))
+```
+
+```{r}
+#(Fuad)
+# Feature importance for ADHD prediction
+adhd_importance <- importance(rf_adhd)
+adhd_imp_df <- as.data.frame(adhd_importance)
+adhd_imp_df$Feature <- rownames(adhd_imp_df)
+adhd_imp_df <- adhd_imp_df %>% arrange(desc(MeanDecreaseGini))
+
+# Visualize top 20 features for ADHD prediction
+ggplot(adhd_imp_df[1:20,], aes(x = reorder(Feature, MeanDecreaseGini), y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  labs(title = "Top 20 Features for ADHD Prediction",
+       x = "Feature",
+       y = "Mean Decrease in Gini Index")
+
+# Feature importance for Sex prediction
+sex_importance <- importance(rf_sex)
+sex_imp_df <- as.data.frame(sex_importance)
+sex_imp_df$Feature <- rownames(sex_imp_df)
+sex_imp_df <- sex_imp_df %>% arrange(desc(MeanDecreaseGini))
+
+# Visualize top 20 features for Sex prediction
+ggplot(sex_imp_df[1:20,], aes(x = reorder(Feature, MeanDecreaseGini), y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", fill = "lightpink") +
+  coord_flip() +
+  labs(title = "Top 20 Features for Sex Prediction",
+       x = "Feature",
+       y = "Mean Decrease in Gini Index")
+```
+
+```{r}
+#(Samira)
+# Logistic Regression-----------------------------------------------------------------------------------------------------------------------------
+library(caret)
+library(dplyr)
+
+# Making Target Variables Factors
+Y_train <- Y_train %>% mutate(ADHD_Outcome = as.factor(ADHD_Outcome),
+  Sex_F = as.factor(Sex_F))
+Y_test <- Y_test %>% mutate(ADHD_Outcome = as.factor(ADHD_Outcome),
+  Sex_F = as.factor(Sex_F))
+
+# Train Logistic Regression Model for ADHD Prediction
+set.seed(123)
+logismod_adhd <- train(ADHD_Outcome ~ .,
+  data = cbind(X_train, ADHD_Outcome = Y_train$ADHD_Outcome),
+  method = "glm",
+  family = "binomial")
+summary(logismod_adhd)
+
+# Train Logistic Regression Model for Sex Prediction
+set.seed(123)
+logismod_sex <- train(Sex_F ~ .,
+  data = cbind(X_train, Sex_F = Y_train$Sex_F),
+  method = "glm",
+  family = "binomial")
+summary(logismod_sex)
+
+# Making Predictions on the Test Set
+predictions_adhd <- predict(logismod_adhd, newdata = X_test)
+predictions_sex <- predict(logismod_sex, newdata = X_test)
+
+# Evaluating ADHD Prediction Model
+confusionMatrix_adhd <- confusionMatrix(predictions_adhd, Y_test$ADHD_Outcome)
+print("Confusion Matrix for ADHD Prediction:")
+print(confusionMatrix_adhd)
+
+# Evaluating Sex Prediction Model
+confusionMatrix_sex <- confusionMatrix(predictions_sex, Y_test$Sex_F)
+print("Confusion Matrix for Sex Prediction:")
+print(confusionMatrix_sex)
+```
+
+```{r}
+#(Samira)
+library(hnp)
+
+# Creating a Half_Normal Plot of Deviance of Residuals for the adhd model
+deviance_residuals <- residuals(logismod_adhd$finalModel, type = "deviance")
+hnp(deviance_residuals, halfnormal = TRUE, main = "Half-Normal Plot of Deviance Residuals for ADHD model")
+
+#  Creating a Half_Normal Plot of Residuals for the adhd model
+residuals_adhd <- residuals(logismod_adhd$finalModel, type = "response")
+hnp(residuals_adhd, halfnormal = TRUE, main = "Half-Normal of Residuals for ADHD model")
+```
+```{r}
+#(Samira)
+# Creating a Half_Normal Plot of Deviance of Residuals for the sex model
+deviance_residuals <- residuals(logismod_sex$finalModel, type = "deviance")
+hnp(deviance_residuals, halfnormal = TRUE, main = "Half-Normal Plot of Deviance Residuals for Sex model")
+
+#  Creating a Half_Normal Plot of Residuals for the sex model
+residuals_sex <- residuals(logismod_sex$finalModel, type = "response")
+hnp(residuals_sex, halfnormal = TRUE, main = "Half-Normal of Residuals for Sex model")
+```
+
+```{r}
+#(Samira)
 # Importing the TEST dataset----------------------------------------------------------------------------------------------------------------------
 setwd("C:/Users/nassi/OneDrive/Documents/ISTA_321/widsdatathon2025/TEST")
 
@@ -135,7 +300,8 @@ test_connectome <- read.csv("TEST_FUNCTIONAL_CONNECTOME_MATRICES.csv")
 ```
 
 ```{r}
-# Checking if there are any NA's
+#(Samira)
+# Checking if there are any NA's in the test dataset
 sum(is.na(test_quantitative))
 sum(is.na(test_categorical))
 sum(is.na(test_connectome))
@@ -149,38 +315,44 @@ for (i in 1:ncol(test_quant)) {
 }
 sum(is.na(test_quant))
 
+# Imputing the NA values with the median
 test_cat <- test_categorical 
 for (i in 1:ncol(test_cat)){
   if(is.numeric(test_cat[[i]])){
-    test_cat[[i]][is.na(test_cat[[i]])] <- mean(test_cat[[i]], na.rm = TRUE)
+    test_cat[[i]][is.na(test_cat[[i]])] <- median(test_cat[[i]], na.rm = TRUE)
   }
 }
 sum(is.na(test_cat))
 ```
 
 ```{r}
+#(Genesis)
 # PCA on test connectome
 tmatrix_only <- test_connectome %>%
-  select(where(is.numeric))
+  dplyr::select(where(is.numeric))
 
 tmatrix_scaled <- scale(tmatrix_only)
 
 test_pca_result <- prcomp(tmatrix_scaled, center = TRUE, scale. = TRUE)
-
-test_connectome_pca <- as.data.frame(test_pca_result$x[,1:50])
-head(test_connectome_pca)
 ```
 
 ```{r}
+#(Samira)
+# Since we chose 50 principal component of the train set well do 50 for the test set to be able to match
+test_connectome_pca <- as.data.frame(test_pca_result$x[,1:50])
+```
+
+```{r}
+#(Samira)
 # Merging the test data
 merged_test_data <- inner_join(test_quant, test_cat, by = "participant_id")
 final_test_dataset <- cbind(merged_test_data, test_connectome_pca)
 head(final_test_dataset)
 ```
 
-
 ```{r}
-# Creating our predictions and output
+#(Samira)
+# Creating our predictions and output for the random forests model
 predicted_adhd <- predict(rf_adhd, newdata = final_test_dataset, type = "class")
 predicted_gender <- predict(rf_sex, newdata = final_test_dataset, type = "class")
 
@@ -191,7 +363,26 @@ output_df <- data.frame(
   ADHD_Outcome = predicted_adhd,
   Sex_F = predicted_gender
 )
-print(output_df)
+head(output_df)
 
-write.csv(output_df, "Submission_1.csv", row.names = FALSE)
+#write.csv(output_df, "Submission_1.csv", row.names = FALSE)
 ```
+
+```{r}
+#(Samira)
+# Creating our predictions and output for the logistic regression model
+predicted_adhd <- predict(logismod_adhd, newdata = final_test_dataset)
+predicted_gender <- predict(logismod_sex, newdata = final_test_dataset)
+
+participant_ids <- final_test_dataset$participant_id
+
+output_df <- data.frame(
+  participant_id = participant_ids,
+  ADHD_Outcome = predicted_adhd,
+  Sex_F = predicted_gender
+)
+head(output_df)
+
+#write.csv(output_df, "Submission_2.csv", row.names = FALSE)
+```
+
